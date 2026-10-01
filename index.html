@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16130f">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>Twarz</title>
+<style>
+  :root { --bg:#16130f; --ink:#f3ece0; --dim:#a89f90; --ok:#8fd19e; --err:#ff8a7a; --ring:#f3ece0; }
+  * { box-sizing:border-box; margin:0; }
+  html,body { height:100%; background:var(--bg); color:var(--ink); font:17px/1.4 system-ui,sans-serif; overflow:hidden; }
+  #stage { position:fixed; inset:0; }
+  video, #shot { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  video { transform:scaleX(-1); }
+  #shot { transform:scaleX(-1); display:none; }
+  svg.mask { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  #msg { position:absolute; left:0; right:0; top:calc(env(safe-area-inset-top,0px) + 18px); text-align:center; padding:0 24px; font-weight:600; text-shadow:0 1px 8px #000a; }
+  #msg.ok { color:var(--ok); } #msg.err { color:var(--err); }
+  #bar { position:absolute; left:0; right:0; bottom:0; padding:24px 24px calc(env(safe-area-inset-bottom,0px) + 28px); display:flex; justify-content:center; align-items:center; gap:28px; }
+  button { font:inherit; color:var(--ink); border:0; cursor:pointer; }
+  #snap { width:78px; height:78px; border-radius:50%; background:var(--ring); border:5px solid var(--bg); outline:3px solid var(--ring); }
+  #snap:active { transform:scale(.94); }
+  .pill { padding:14px 26px; border-radius:99px; background:#ffffff1f; backdrop-filter:blur(8px); font-weight:600; }
+  #login { position:absolute; inset:0; display:none; flex-direction:column; justify-content:center; align-items:center; gap:20px; padding:32px; text-align:center; background:var(--bg); }
+  #login p { color:var(--dim); max-width:28ch; }
+  .hide { display:none !important; }
+  button:focus-visible { outline:3px solid #fff; outline-offset:3px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="cam" playsinline muted autoplay></video>
+  <canvas id="shot"></canvas>
+  <svg class="mask" viewBox="0 0 100 100" preserveAspectRatio="none">
+    <defs><mask id="m"><rect width="100" height="100" fill="#fff"/><ellipse cx="50" cy="42" rx="31" ry="25" fill="#000"/></mask></defs>
+    <rect width="100" height="100" fill="#16130fb8" mask="url(#m)"/>
+  </svg>
+  <svg class="mask" viewBox="0 0 100 100" preserveAspectRatio="none" id="ringsvg">
+    <ellipse cx="50" cy="42" rx="31" ry="25" fill="none" stroke="#f3ece0" stroke-width=".4" vector-effect="non-scaling-stroke" style="stroke-width:2px"/>
+  </svg>
+  <div id="msg"></div>
+  <div id="bar">
+    <button id="snap" aria-label="Zrób zdjęcie"></button>
+    <button id="again" class="pill hide">Zrób ponownie</button>
+    <button id="retry" class="pill hide">Wyślij jeszcze raz</button>
+  </div>
+</div>
+<div id="login">
+  <h1>Twarz</h1>
+  <p>Zaloguj się do Dropboxa jeden raz. Potem appka sama wysyła zdjęcia.</p>
+  <button id="loginBtn" class="pill">Zaloguj do Dropboxa</button>
+</div>
+
+<script>
+const APP_KEY = "zdf1h1tjz4crgqn";
+const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, "");
+const $ = id => document.getElementById(id);
+const store = { get:k=>{try{return localStorage.getItem(k)}catch(e){return null}}, set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}, del:k=>{try{localStorage.removeItem(k)}catch(e){}} };
+let blob = null, stream = null;
+
+function say(t, cls="") { const m=$("msg"); m.textContent=t; m.className=cls; }
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+
+async function startLogin() {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  store.set("verifier", verifier);
+  const p = new URLSearchParams({ client_id:APP_KEY, response_type:"code", code_challenge:challenge,
+    code_challenge_method:"S256", token_access_type:"offline", redirect_uri:REDIRECT });
+  location.href = "https://www.dropbox.com/oauth2/authorize?" + p;
+}
+
+async function tokenCall(params) {
+  const r = await fetch("https://api.dropboxapi.com/oauth2/token", { method:"POST", body:new URLSearchParams(params) });
+  if (!r.ok) throw new Error("token " + r.status);
+  return r.json();
+}
+
+async function finishLogin(code) {
+  const j = await tokenCall({ code, grant_type:"authorization_code", code_verifier:store.get("verifier")||"",
+    client_id:APP_KEY, redirect_uri:REDIRECT });
+  store.set("refresh", j.refresh_token);
+  store.del("verifier");
+  history.replaceState(null, "", REDIRECT);
+}
+
+async function accessToken() {
+  const j = await tokenCall({ grant_type:"refresh_token", refresh_token:store.get("refresh"), client_id:APP_KEY });
+  return j.access_token;
+}
+
+function fileName() {
+  const d = new Date(), z = n => String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}.jpg`;
+}
+
+async function upload() {
+  $("retry").classList.add("hide");
+  say("Wysyłam…");
+  try {
+    const tok = await accessToken();
+    const r = await fetch("https://content.dropboxapi.com/2/files/upload", { method:"POST",
+      headers:{ Authorization:"Bearer "+tok, "Content-Type":"application/octet-stream",
+        "Dropbox-API-Arg": JSON.stringify({ path:"/"+fileName(), mode:"overwrite", mute:true }) },
+      body: blob });
+    if (!r.ok) throw new Error("upload " + r.status);
+    say("Wysłano ✓", "ok");
+    blob = null;
+  } catch (e) {
+    say("Nie udało się wysłać. Sprawdź internet i spróbuj ponownie.", "err");
+    $("retry").classList.remove("hide");
+  }
+}
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:"user", width:{ideal:1440}, height:{ideal:1920} }, audio:false });
+    $("cam").srcObject = stream;
+    say("Ustaw twarz w owalu");
+  } catch (e) { say("Brak dostępu do aparatu. Zezwól na niego w ustawieniach Chrome.", "err"); }
+}
+
+function snap() {
+  const v = $("cam"), c = $("shot");
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext("2d").drawImage(v, 0, 0);
+  c.style.display = "block"; v.style.display = "none";
+  $("snap").classList.add("hide"); $("again").classList.remove("hide");
+  c.toBlob(b => { blob = b; upload(); }, "image/jpeg", 0.92);
+}
+
+function again() {
+  $("shot").style.display = "none"; $("cam").style.display = "block";
+  $("snap").classList.remove("hide"); $("again").classList.add("hide"); $("retry").classList.add("hide");
+  say("Ustaw twarz w owalu");
+}
+
+$("snap").onclick = snap;
+$("again").onclick = again;
+$("retry").onclick = upload;
+$("loginBtn").onclick = startLogin;
+
+(async function init() {
+  const code = new URLSearchParams(location.search).get("code");
+  if (code) { try { await finishLogin(code); } catch (e) { alert("Logowanie nie wyszło. Sprawdź Redirect URI w Dropboxie."); } }
+  if (!store.get("refresh")) { $("login").style.display = "flex"; return; }
+  startCamera();
+})();
+</script>
+</body>
+</html>
