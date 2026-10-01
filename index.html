@@ -25,6 +25,7 @@
   .pill { padding:14px 26px; border-radius:99px; background:#ffffff1f; backdrop-filter:blur(8px); font-weight:600; }
   #login { position:absolute; inset:0; display:none; flex-direction:column; justify-content:center; align-items:center; gap:20px; padding:32px; text-align:center; background:var(--bg); }
   #login p { color:var(--dim); max-width:28ch; }
+  #count { position:absolute; left:0; right:0; top:42%; transform:translateY(-50%); text-align:center; font-size:120px; font-weight:700; text-shadow:0 2px 16px #000a; pointer-events:none; }
   .hide { display:none !important; }
   button:focus-visible { outline:3px solid #fff; outline-offset:3px; }
 </style>
@@ -41,6 +42,7 @@
     <ellipse cx="50" cy="42" rx="31" ry="25" fill="none" stroke="#f3ece0" stroke-width=".4" vector-effect="non-scaling-stroke" style="stroke-width:2px"/>
   </svg>
   <div id="msg"></div>
+  <div id="count"></div>
   <div id="bar">
     <button id="snap" aria-label="Zrób zdjęcie"></button>
     <button id="again" class="pill hide">Zrób ponownie</button>
@@ -122,7 +124,19 @@ async function startCamera() {
   } catch (e) { say("Brak dostępu do aparatu. Zezwól na niego w ustawieniach Chrome.", "err"); }
 }
 
+const COUNTDOWN = 3; // sekundy przed zdjęciem
 function snap() {
+  $("snap").classList.add("hide");
+  let n = COUNTDOWN;
+  const tick = () => {
+    if (n > 0) { $("count").textContent = n; n--; setTimeout(tick, 1000); }
+    else { $("count").textContent = ""; capture(); }
+  };
+  say("");
+  tick();
+}
+
+function capture() {
   const v = $("cam"), c = $("shot");
   c.width = v.videoWidth; c.height = v.videoHeight;
   c.getContext("2d").drawImage(v, 0, 0);
