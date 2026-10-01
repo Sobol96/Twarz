@@ -29,6 +29,9 @@
   #flash { position:absolute; inset:0; z-index:5; background:#fff; opacity:0; pointer-events:none; transition:opacity .12s; }
   #flash.on { opacity:1; }
   #flashBtn { position:absolute; left:20px; bottom:calc(env(safe-area-inset-bottom,0px) + 46px); padding:12px 18px; }
+  #notePanel { position:absolute; left:16px; right:16px; top:calc(env(safe-area-inset-top,0px) + 64px); display:flex; gap:10px; z-index:6; }
+  #note { flex:1; min-width:0; resize:none; height:52px; border:0; border-radius:14px; padding:10px 14px; font:inherit; color:var(--ink); background:#16130fd9; }
+  #note::placeholder { color:var(--dim); }
   .hide { display:none !important; }
   button:focus-visible { outline:3px solid #fff; outline-offset:3px; }
 </style>
@@ -46,6 +49,10 @@
   </svg>
   <div id="msg"></div>
   <div id="count"></div>
+  <div id="notePanel" class="hide">
+    <textarea id="note" maxlength="200" placeholder="Notatka na dziś (opcjonalnie)"></textarea>
+    <button id="noteBtn" class="pill">Zapisz</button>
+  </div>
   <div id="flash"></div>
   <div id="bar">
     <button id="flashBtn" class="pill">Flash</button>
@@ -65,7 +72,7 @@ const APP_KEY = "zdf1h1tjz4crgqn";
 const REDIRECT = location.origin + location.pathname.replace(/index\.html$/, "");
 const $ = id => document.getElementById(id);
 const store = { get:k=>{try{return localStorage.getItem(k)}catch(e){return null}}, set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}, del:k=>{try{localStorage.removeItem(k)}catch(e){}} };
-let blob = null, stream = null;
+let blob = null, stream = null, photoName = fileName0();
 
 function say(t, cls="") { const m=$("msg"); m.textContent=t; m.className=cls; }
 const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
@@ -98,6 +105,7 @@ async function accessToken() {
   return j.access_token;
 }
 
+function fileName0() { return fileName(); }
 function fileName() {
   const d = new Date(), z = n => String(n).padStart(2,"0");
   return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}.jpg`;
@@ -110,10 +118,11 @@ async function upload() {
     const tok = await accessToken();
     const r = await fetch("https://content.dropboxapi.com/2/files/upload", { method:"POST",
       headers:{ Authorization:"Bearer "+tok, "Content-Type":"application/octet-stream",
-        "Dropbox-API-Arg": JSON.stringify({ path:"/"+fileName(), mode:"overwrite", mute:true }) },
+        "Dropbox-API-Arg": JSON.stringify({ path:"/"+photoName, mode:"overwrite", mute:true }) },
       body: blob });
     if (!r.ok) throw new Error("upload " + r.status);
     say("Wysłano ✓", "ok");
+    $("notePanel").classList.remove("hide");
     blob = null;
   } catch (e) {
     say("Nie udało się wysłać. Sprawdź internet i spróbuj ponownie.", "err");
@@ -149,6 +158,7 @@ function shoot() {
 }
 
 function capture() {
+  photoName = fileName();
   const v = $("cam"), c = $("shot");
   const vw = v.videoWidth, vh = v.videoHeight;
   const k = Math.max(innerWidth / vw, innerHeight / vh);
@@ -162,9 +172,27 @@ function capture() {
 
 function again() {
   $("shot").style.display = "none"; $("cam").style.display = "block";
-  $("snap").classList.remove("hide"); $("again").classList.add("hide"); $("retry").classList.add("hide");
+  $("snap").classList.remove("hide"); $("again").classList.add("hide"); $("retry").classList.add("hide"); $("notePanel").classList.add("hide");
   say("Ustaw twarz w owalu");
 }
+
+async function saveNote() {
+  const t = $("note").value.trim();
+  if (!t) return;
+  $("noteBtn").disabled = true;
+  say("Zapisuję notatkę…");
+  try {
+    const tok = await accessToken();
+    const r = await fetch("https://content.dropboxapi.com/2/files/upload", { method:"POST",
+      headers:{ Authorization:"Bearer "+tok, "Content-Type":"application/octet-stream",
+        "Dropbox-API-Arg": JSON.stringify({ path:"/"+photoName.replace(/\.jpg$/, ".txt"), mode:"overwrite", mute:true }) },
+      body: new Blob([t]) });
+    if (!r.ok) throw new Error("note " + r.status);
+    say("Notatka zapisana ✓", "ok");
+  } catch (e) { say("Nie udało się zapisać notatki. Spróbuj ponownie.", "err"); }
+  $("noteBtn").disabled = false;
+}
+$("noteBtn").onclick = saveNote;
 
 let flashOn = false;
 function setFlash(on) {
