@@ -26,6 +26,9 @@
   #login { position:absolute; inset:0; display:none; flex-direction:column; justify-content:center; align-items:center; gap:20px; padding:32px; text-align:center; background:var(--bg); }
   #login p { color:var(--dim); max-width:28ch; }
   #count { position:absolute; left:0; right:0; top:42%; transform:translateY(-50%); text-align:center; font-size:120px; font-weight:700; text-shadow:0 2px 16px #000a; pointer-events:none; }
+  #flash { position:absolute; inset:0; z-index:5; background:#fff; opacity:0; pointer-events:none; transition:opacity .12s; }
+  #flash.on { opacity:1; }
+  #flashBtn { position:absolute; left:20px; bottom:calc(env(safe-area-inset-bottom,0px) + 46px); padding:12px 18px; }
   .hide { display:none !important; }
   button:focus-visible { outline:3px solid #fff; outline-offset:3px; }
 </style>
@@ -36,14 +39,16 @@
   <canvas id="shot"></canvas>
   <svg class="mask" viewBox="0 0 100 100" preserveAspectRatio="none">
     <defs><mask id="m"><rect width="100" height="100" fill="#fff"/><ellipse cx="50" cy="48" rx="40" ry="29" fill="#000"/></mask></defs>
-    <rect width="100" height="100" fill="#16130fb8" mask="url(#m)"/>
+    <rect id="dim" width="100" height="100" fill="#16130fb8" mask="url(#m)"/>
   </svg>
   <svg class="mask" viewBox="0 0 100 100" preserveAspectRatio="none" id="ringsvg">
     <ellipse cx="50" cy="48" rx="40" ry="29" fill="none" stroke="#f3ece0" stroke-width=".4" vector-effect="non-scaling-stroke" style="stroke-width:2px"/>
   </svg>
   <div id="msg"></div>
   <div id="count"></div>
+  <div id="flash"></div>
   <div id="bar">
+    <button id="flashBtn" class="pill">Flash</button>
     <button id="snap" aria-label="Zrób zdjęcie"></button>
     <button id="again" class="pill hide">Zrób ponownie</button>
     <button id="retry" class="pill hide">Wyślij jeszcze raz</button>
@@ -130,10 +135,17 @@ function snap() {
   let n = COUNTDOWN;
   const tick = () => {
     if (n > 0) { $("count").textContent = n; n--; setTimeout(tick, 1000); }
-    else { $("count").textContent = ""; capture(); }
+    else { $("count").textContent = ""; shoot(); }
   };
   say("");
   tick();
+}
+
+const FLASH_CZEKAJ = 800; // ms: tyle czeka biały ekran, żeby aparat dostosował ekspozycję
+function shoot() {
+  if (!flashOn) { capture(); return; }
+  $("flash").classList.add("on");
+  setTimeout(() => { capture(); $("flash").classList.remove("on"); }, FLASH_CZEKAJ);
 }
 
 function capture() {
@@ -154,6 +166,14 @@ function again() {
   say("Ustaw twarz w owalu");
 }
 
+let flashOn = false;
+function setFlash(on) {
+  flashOn = on;
+  $("flashBtn").textContent = on ? "Flash: wł." : "Flash";
+  store.set("flash", on ? "1" : "0");
+}
+$("flashBtn").onclick = () => setFlash(!flashOn);
+setFlash(store.get("flash") === "1");
 $("snap").onclick = snap;
 $("again").onclick = again;
 $("retry").onclick = upload;
