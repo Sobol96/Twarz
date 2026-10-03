@@ -1,6 +1,6 @@
 {
-  "name": "Twarz",
-  "short_name": "Twarz",
+  "name": "FaceID",
+  "short_name": "FaceID",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
