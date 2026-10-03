@@ -125,6 +125,7 @@ async function upload() {
     $("notePanel").classList.remove("hide");
     blob = null;
   } catch (e) {
+    if (/token 40[01]/.test(e.message)) { store.del("refresh"); $("login").style.display = "flex"; return; }
     say("Nie udało się wysłać. Sprawdź internet i spróbuj ponownie.", "err");
     $("retry").classList.remove("hide");
   }
@@ -210,6 +211,9 @@ $("loginBtn").onclick = startLogin;
 (async function init() {
   const code = new URLSearchParams(location.search).get("code");
   if (code) { try { await finishLogin(code); } catch (e) { alert("Logowanie nie wyszło. Sprawdź Redirect URI w Dropboxie."); } }
+  if (store.get("refresh")) {
+    try { await accessToken(); } catch (e) { if (/token 40[01]/.test(e.message)) store.del("refresh"); }
+  }
   if (!store.get("refresh")) { $("login").style.display = "flex"; return; }
   startCamera();
 })();
